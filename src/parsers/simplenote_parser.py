@@ -35,7 +35,7 @@ class SimplenoteParser:
     def parse_html(self, html: bytes) -> List[str]:
         soup = BeautifulSoup(html, 'lxml')
         table = soup.find('div', {'class': "note note-detail-markdown"})
-        return [url.text for url in table.findAll('a')]
+        return [f"https://{url}" for url in table.text.strip().split("https://")[1:]]
 
     def get_requests(self) -> List[str]:
         return self.parse_html(html=self.get_html_from_simplenote(uri=getenv('URI_SIMPLENOTE')))

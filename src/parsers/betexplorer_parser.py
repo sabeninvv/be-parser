@@ -1,4 +1,5 @@
 from os import getenv
+from random import uniform
 from typing import Optional, List, Set, Any, Dict
 from multiprocessing import Queue
 from queue import Empty
@@ -6,10 +7,11 @@ from time import time
 
 import asyncio
 from aiohttp import ClientSession, ClientTimeout, TCPConnector
+from aiohttp_socks import ProxyType, ProxyConnector
 from bs4 import BeautifulSoup
 from redis import StrictRedis
 from ..logger import logger
-from ..tools import decode_by_b64, decoding_bytes2str
+from ..tools import decode_by_b64, decoding_bytes2str, retry_async
 from ..service import TelegramClient
 
 
@@ -22,6 +24,7 @@ class BetExplorerParser:
         self.__connection = StrictRedis(password=getenv('REDIS_PASSWORD'))
         self.__telegram_cli: Optional[TelegramClient] = None
 
+    @retry_async(logger=logger, num_tries=200, idle_time_sec=.5)
     async def get_html_match_info(self, uri: str) -> Dict[str, Any]:
         tail = -2 if uri[-1] == "/" else -1
         match_id = uri.split("/")[tail]
@@ -40,12 +43,14 @@ class BetExplorerParser:
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/103.0.5060.66 Safari/537.36',
             'x-requested-with': 'XMLHttpRequest',
         }
-        async with self.__session.get(url=f'https://www.betexplorer.com/match-odds/{match_id}/1/ha/',
+        async with self.__session.get(url=f'https://www.betexplorer.com/match-odds/{match_id}/1/1x2/',
                                       cookies=cookies, headers=headers) as resp:
             resp.raise_for_status()
             return await resp.json(content_type="text/plain")
 
+    @retry_async(logger=logger, num_tries=200, idle_time_sec=.5)
     async def get_bookmakers_from_match(self, uri):
+        await asyncio.sleep(uniform(.1, 1.1))
         html_match_info = await self.get_html_match_info(uri=uri)
         soup = BeautifulSoup(html_match_info["odds"], 'lxml')
         blocks = soup.findAll('td', {'class': "h-text-left over-s-only"})
@@ -118,6 +123,7 @@ class BetExplorerParser:
             keys4del = [*keys4del, *wanted_bookmakers_all, f"{match_hash}:timestamp", f"{match_hash}:bookmakers"]
             _ = self.__connection.delete(*keys4del)
         self.__futures.discard(future)
+        self.create_future(match_hash=match_hash)
 
     def create_future(self, match_hash: str):
         future: asyncio.Future = asyncio.ensure_future(coro_or_future=self.wrap_scrap(match_hash=match_hash))
@@ -135,7 +141,9 @@ class BetExplorerParser:
             await asyncio.sleep(.001)
 
     async def ride_round_robin(self):
-        self.__session: ClientSession = ClientSession(connector=TCPConnector(force_close=True), trust_env=True,
+        connector = ProxyConnector(proxy_type=ProxyType.SOCKS5, host='127.0.0.1', port=9050, rdns=True)
+        # connector = TCPConnector(force_close=True)
+        self.__session: ClientSession = ClientSession(connector=connector, trust_env=True,
                                                       timeout=ClientTimeout(total=60 * 60, sock_read=480))
         self.__telegram_cli = TelegramClient(session=self.__session,
                                              token=getenv('TELEGRAM_TOKEN'))
