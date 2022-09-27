@@ -22,9 +22,7 @@ class SimplenoteParser:
 
     def parse_request(self, response: str) -> Match:
         uri, *bookmakers = response.strip().split(",")
-        bookmakers = ['10bet', '1xbet', 'bet-at-home', 'betvictor', 'betway',
-                      'bwin', 'comeon', 'pinnacle', 'unibet', 'william hill',
-                      'youwin', 'betfair exchange'] if not bookmakers else bookmakers
+        bookmakers = ['1xbet', 'pinnacle', 'betfair exchange'] if not bookmakers else bookmakers
         bookmakers = set(bookmaker.lower() for bookmaker in bookmakers)
         match_meta = Match(uri=uri, bookmakers=bookmakers)
         return match_meta
